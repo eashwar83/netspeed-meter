@@ -7,6 +7,8 @@ import sys
 DEFAULTS = {
     "theme": "dark",
     "position": "top-right",
+    "custom_x": None,
+    "custom_y": None,
     "opacity": 0.85,
     "update_interval": 1.0,
     "compact": False,

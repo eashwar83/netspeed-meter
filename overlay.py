@@ -200,6 +200,14 @@ class SpeedOverlay:
 
     def _position_window(self):
         self.root.update_idletasks()
+
+        cx = self.cfg.get("custom_x")
+        cy = self.cfg.get("custom_y")
+        if cx is not None and cy is not None:
+            self.custom_position = True
+            self.root.geometry(f"+{cx}+{cy}")
+            return
+
         w = self.root.winfo_width()
         h = self.root.winfo_height()
         sw = self.root.winfo_screenwidth()
@@ -241,6 +249,10 @@ class SpeedOverlay:
 
     def _on_drag_end(self, event):
         self.dragging = False
+        if self.custom_position:
+            self.cfg["custom_x"] = self.root.winfo_x()
+            self.cfg["custom_y"] = self.root.winfo_y()
+            settings.save(self.cfg)
 
     def _show_context_menu(self, event):
         menu = tk.Menu(self.root, tearoff=0)
@@ -309,6 +321,8 @@ class SpeedOverlay:
 
     def _set_position(self, pos):
         self.cfg["position"] = pos
+        self.cfg["custom_x"] = None
+        self.cfg["custom_y"] = None
         self.custom_position = False
         self._position_window()
         self._save()
