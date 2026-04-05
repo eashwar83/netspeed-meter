@@ -61,10 +61,12 @@ class SpeedOverlay:
 
         self._build_ui()
         self._apply_theme()
-        self._position_window()
         self._bind_events()
 
-        self.root.deiconify()
+        # Delay the initial show + position so the Windows shell (Explorer/DWM)
+        # is fully ready before we place the window. Without this, apps launched
+        # via the startup registry key appear at wrong coordinates or get lost.
+        self.root.after(2500, self._startup_show)
         self._tick()
 
     def _build_ui(self):
@@ -190,6 +192,11 @@ class SpeedOverlay:
             pass
         for child in widget.winfo_children():
             self._apply_bg_recursive(child, bg)
+
+    def _startup_show(self):
+        """Called after a short delay to ensure the shell is ready."""
+        self._position_window()
+        self.root.deiconify()
 
     def _position_window(self):
         self.root.update_idletasks()
