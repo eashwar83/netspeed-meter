@@ -201,17 +201,22 @@ class SpeedOverlay:
     def _position_window(self):
         self.root.update_idletasks()
 
-        cx = self.cfg.get("custom_x")
-        cy = self.cfg.get("custom_y")
-        if cx is not None and cy is not None:
-            self.custom_position = True
-            self.root.geometry(f"+{cx}+{cy}")
-            return
-
         w = self.root.winfo_width()
         h = self.root.winfo_height()
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
+
+        cx = self.cfg.get("custom_x")
+        cy = self.cfg.get("custom_y")
+        if cx is not None and cy is not None:
+            # Clamp to visible screen area so a resolution/monitor change
+            # never strands the widget off-screen.
+            margin = 10
+            cx = max(margin, min(cx, sw - w - margin))
+            cy = max(margin, min(cy, sh - h - margin))
+            self.custom_position = True
+            self.root.geometry(f"+{cx}+{cy}")
+            return
 
         pos = self.cfg["position"]
         ox, oy = POSITIONS.get(pos, POSITIONS["top-right"])
@@ -311,6 +316,7 @@ class SpeedOverlay:
 
         menu.add_separator()
         menu.add_command(label="Refresh IP", command=self.ip_fetcher.refresh)
+        menu.add_command(label="Reset Position", command=self._reset_position)
         menu.add_command(label="Quit", command=self.on_quit)
 
         menu.tk_popup(event.x_root, event.y_root)
@@ -318,6 +324,14 @@ class SpeedOverlay:
     def _set_theme(self, theme):
         self.cfg["theme"] = theme
         self._rebuild()
+
+    def _reset_position(self):
+        """Clear any saved position and snap to the default corner."""
+        self.cfg["custom_x"] = None
+        self.cfg["custom_y"] = None
+        self.custom_position = False
+        self._position_window()
+        self._save()
 
     def _set_position(self, pos):
         self.cfg["position"] = pos
