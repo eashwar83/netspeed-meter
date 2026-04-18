@@ -67,6 +67,7 @@ class SpeedOverlay:
         # is fully ready before we place the window. Without this, apps launched
         # via the startup registry key appear at wrong coordinates or get lost.
         self.root.after(2500, self._startup_show)
+        self.root.after(5000, self._ensure_on_screen)
         self._tick()
 
     def _build_ui(self):
@@ -212,10 +213,14 @@ class SpeedOverlay:
             # Clamp to visible screen area so a resolution/monitor change
             # never strands the widget off-screen.
             margin = 10
-            cx = max(margin, min(cx, sw - w - margin))
-            cy = max(margin, min(cy, sh - h - margin))
+            new_cx = max(margin, min(cx, sw - w - margin))
+            new_cy = max(margin, min(cy, sh - h - margin))
             self.custom_position = True
-            self.root.geometry(f"+{cx}+{cy}")
+            self.root.geometry(f"+{new_cx}+{new_cy}")
+            if new_cx != cx or new_cy != cy:
+                self.cfg["custom_x"] = new_cx
+                self.cfg["custom_y"] = new_cy
+                settings.save(self.cfg)
             return
 
         pos = self.cfg["position"]
@@ -225,6 +230,52 @@ class SpeedOverlay:
         y = oy if oy >= 0 else sh + oy - h
 
         self.root.geometry(f"+{x}+{y}")
+
+    def _ensure_on_screen(self):
+        # Reposition if the widget is stranded outside the virtual desktop —
+        # e.g., after an external monitor is disconnected and its coordinates
+        # no longer map to any connected display.
+        try:
+            self.root.update_idletasks()
+            w = self.root.winfo_width()
+            h = self.root.winfo_height()
+            x = self.root.winfo_x()
+            y = self.root.winfo_y()
+
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                vs_x = user32.GetSystemMetrics(76)
+                vs_y = user32.GetSystemMetrics(77)
+                vs_w = user32.GetSystemMetrics(78)
+                vs_h = user32.GetSystemMetrics(79)
+            except (AttributeError, OSError):
+                vs_x, vs_y = 0, 0
+                vs_w = self.root.winfo_screenwidth()
+                vs_h = self.root.winfo_screenheight()
+
+            off_screen = (
+                x + w <= vs_x or
+                y + h <= vs_y or
+                x >= vs_x + vs_w or
+                y >= vs_y + vs_h
+            )
+
+            if off_screen:
+                sw = self.root.winfo_screenwidth()
+                sh = self.root.winfo_screenheight()
+                margin = 10
+                new_x = max(margin, min(x, sw - w - margin))
+                new_y = max(margin, min(y, sh - h - margin))
+                self.root.geometry(f"+{new_x}+{new_y}")
+                self.cfg["custom_x"] = new_x
+                self.cfg["custom_y"] = new_y
+                self.custom_position = True
+                settings.save(self.cfg)
+        except tk.TclError:
+            return
+
+        self.root.after(3000, self._ensure_on_screen)
 
     def _bind_events(self):
         widgets = [self.frame, self.down_arrow, self.down_label,
@@ -316,6 +367,7 @@ class SpeedOverlay:
 
         menu.add_separator()
         menu.add_command(label="Refresh IP", command=self.ip_fetcher.refresh)
+        menu.add_command(label="Set Default Position", command=self._set_default_position)
         menu.add_command(label="Reset Position", command=self._reset_position)
         menu.add_command(label="Quit", command=self.on_quit)
 
@@ -326,11 +378,25 @@ class SpeedOverlay:
         self._rebuild()
 
     def _reset_position(self):
-        """Clear any saved position and snap to the default corner."""
-        self.cfg["custom_x"] = None
-        self.cfg["custom_y"] = None
-        self.custom_position = False
+        """Snap to the user-saved default position, or the corner preset if none."""
+        dx = self.cfg.get("default_x")
+        dy = self.cfg.get("default_y")
+        if dx is not None and dy is not None:
+            self.cfg["custom_x"] = dx
+            self.cfg["custom_y"] = dy
+            self.custom_position = True
+        else:
+            self.cfg["custom_x"] = None
+            self.cfg["custom_y"] = None
+            self.custom_position = False
         self._position_window()
+        self._save()
+
+    def _set_default_position(self):
+        """Capture the widget's current position as the default for Reset Position."""
+        self.root.update_idletasks()
+        self.cfg["default_x"] = self.root.winfo_x()
+        self.cfg["default_y"] = self.root.winfo_y()
         self._save()
 
     def _set_position(self, pos):

@@ -9,6 +9,8 @@ DEFAULTS = {
     "position": "top-right",
     "custom_x": None,
     "custom_y": None,
+    "default_x": None,
+    "default_y": None,
     "opacity": 0.85,
     "update_interval": 1.0,
     "compact": False,

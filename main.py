@@ -12,19 +12,12 @@ from tray import TrayIcon
 
 
 def main():
-    tray = TrayIcon(on_quit=lambda: overlay.quit())
-    tray.start()
-
-    def on_settings_changed():
-        pass  # settings are applied immediately in the overlay
-
     overlay = SpeedOverlay(
         on_quit=lambda: (tray.stop(), overlay.quit()),
-        on_settings_changed=on_settings_changed,
+        on_settings_changed=lambda: None,
     )
-    # Update tray quit to also stop the overlay
-    tray.on_quit = lambda: overlay.quit()
-
+    tray = TrayIcon(overlay=overlay, on_quit=lambda: overlay.quit())
+    tray.start()
     overlay.run()
 
 
