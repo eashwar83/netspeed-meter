@@ -34,6 +34,8 @@ POSITIONS = {
     "bottom-right": (-10, -10),
 }
 
+DRAG_THRESHOLD = 4
+
 
 class SpeedOverlay:
     """Transparent, always-on-top overlay showing network speeds."""
@@ -48,6 +50,9 @@ class SpeedOverlay:
         self.dragging = False
         self.drag_x = 0
         self.drag_y = 0
+        self.drag_start_x = 0
+        self.drag_start_y = 0
+        self.drag_moved = False
         self.custom_position = False
 
         self.root = tk.Tk()
@@ -68,20 +73,34 @@ class SpeedOverlay:
         # via the startup registry key appear at wrong coordinates or get lost.
         self.root.after(2500, self._startup_show)
         self.root.after(5000, self._ensure_on_screen)
+        self.root.after(3000, self._reassert_topmost)
         self._tick()
 
     def _build_ui(self):
         theme = THEMES[self.cfg["theme"]]
+        show_ip = self.cfg.get("show_ip", False)
+        frame_kwargs = {
+            "bg": theme["bg"],
+            "highlightbackground": theme["border"],
+            "highlightthickness": 1,
+        }
+        if self.cfg["compact"]:
+            frame_kwargs.update({
+                "padx": 6,
+                "pady": 5,
+                "width": 110,
+                "height": 96 if show_ip else 66,
+            })
+        else:
+            frame_kwargs.update({"padx": 8, "pady": 4})
 
-        self.frame = tk.Frame(
-            self.root,
-            bg=theme["bg"],
-            highlightbackground=theme["border"],
-            highlightthickness=1,
-            padx=8,
-            pady=4,
-        )
+        self.frame = tk.Frame(self.root, **frame_kwargs)
         self.frame.pack(fill=tk.BOTH, expand=True)
+        if self.cfg["compact"]:
+            self.frame.pack_propagate(False)
+
+        self.ip_label = None
+        self.ip_sep = None
 
         if self.cfg["compact"]:
             self._build_compact(theme)
@@ -121,62 +140,62 @@ class SpeedOverlay:
         )
         self.up_label.pack(side=tk.LEFT)
 
-        # IP + country row (separator + info)
-        sep = tk.Frame(self.frame, bg=theme["border"], height=1)
-        sep.pack(fill=tk.X, pady=(3, 2))
+        if self.cfg.get("show_ip", False):
+            sep = tk.Frame(self.frame, bg=theme["border"], height=1)
+            sep.pack(fill=tk.X, pady=(3, 2))
 
-        self.ip_label = tk.Label(
-            self.frame, text="Looking up IP\u2026", fg=theme["label"],
-            bg=theme["bg"], font=("Segoe UI", 8),
-            anchor="w",
-        )
-        self.ip_label.pack(fill=tk.X, pady=(0, 2))
+            self.ip_label = tk.Label(
+                self.frame, text="Looking up IP\u2026", fg=theme["label"],
+                bg=theme["bg"], font=("Segoe UI", 8),
+                anchor="w",
+            )
+            self.ip_label.pack(fill=tk.X, pady=(0, 2))
 
         self.status_label = None
 
     def _build_compact(self, theme):
-        row = tk.Frame(self.frame, bg=theme["bg"])
-        row.pack(fill=tk.X)
+        row_down = tk.Frame(self.frame, bg=theme["bg"])
+        row_down.pack(fill=tk.X, pady=(0, 2))
 
         self.down_arrow = tk.Label(
-            row, text="\u25bc", fg=theme["down_arrow"],
+            row_down, text="\u25bc", fg=theme["down_arrow"],
             bg=theme["bg"], font=("Segoe UI", 8),
         )
-        self.down_arrow.pack(side=tk.LEFT)
+        self.down_arrow.pack(side=tk.LEFT, padx=(0, 3))
 
         self.down_label = tk.Label(
-            row, text="0 B/s", fg=theme["fg"],
-            bg=theme["bg"], font=("Segoe UI", 9),
-            anchor="e", width=10,
+            row_down, text="0 B/s", fg=theme["fg"],
+            bg=theme["bg"], font=("Segoe UI Semibold", 9),
+            anchor="w", width=10,
         )
         self.down_label.pack(side=tk.LEFT)
 
+        row_up = tk.Frame(self.frame, bg=theme["bg"])
+        row_up.pack(fill=tk.X)
+
         self.up_arrow = tk.Label(
-            row, text="\u25b2", fg=theme["up_arrow"],
+            row_up, text="\u25b2", fg=theme["up_arrow"],
             bg=theme["bg"], font=("Segoe UI", 8),
         )
-        self.up_arrow.pack(side=tk.LEFT, padx=(6, 0))
+        self.up_arrow.pack(side=tk.LEFT, padx=(0, 3))
 
         self.up_label = tk.Label(
-            row, text="0 B/s", fg=theme["fg"],
-            bg=theme["bg"], font=("Segoe UI", 9),
-            anchor="e", width=10,
+            row_up, text="0 B/s", fg=theme["fg"],
+            bg=theme["bg"], font=("Segoe UI Semibold", 9),
+            anchor="w", width=10,
         )
         self.up_label.pack(side=tk.LEFT)
 
-        # IP + country on the same row, separated by a thin divider
-        self.ip_sep = tk.Label(
-            row, text=" | ", fg=theme["label"],
-            bg=theme["bg"], font=("Segoe UI", 9),
-        )
-        self.ip_sep.pack(side=tk.LEFT)
+        if self.cfg.get("show_ip", False):
+            sep = tk.Frame(self.frame, bg=theme["border"], height=1)
+            sep.pack(fill=tk.X, pady=(4, 4))
 
-        self.ip_label = tk.Label(
-            row, text="\u2026", fg=theme["label"],
-            bg=theme["bg"], font=("Segoe UI", 8),
-            anchor="w",
-        )
-        self.ip_label.pack(side=tk.LEFT)
+            self.ip_label = tk.Label(
+                self.frame, text="Looking up IP\u2026", fg=theme["label"],
+                bg=theme["bg"], font=("Segoe UI", 8),
+                anchor="center", justify=tk.CENTER,
+            )
+            self.ip_label.pack(fill=tk.X)
 
         self.status_label = None
 
@@ -277,10 +296,34 @@ class SpeedOverlay:
 
         self.root.after(3000, self._ensure_on_screen)
 
+    def _reassert_topmost(self):
+        # Re-pin the widget to the top of the topmost z-order. Other topmost
+        # windows created after ours (e.g., Windows "Click to Do" overlay)
+        # would otherwise sit above us and hide the widget.
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            hwnd = user32.GetAncestor(self.root.winfo_id(), 2)  # GA_ROOT
+            if hwnd:
+                user32.SetWindowPos(
+                    hwnd, -1,  # HWND_TOPMOST
+                    0, 0, 0, 0,
+                    0x0001 | 0x0002 | 0x0010,  # NOSIZE | NOMOVE | NOACTIVATE
+                )
+        except (AttributeError, OSError, tk.TclError):
+            pass
+
+        try:
+            self.root.after(2000, self._reassert_topmost)
+        except tk.TclError:
+            return
+
     def _bind_events(self):
         widgets = [self.frame, self.down_arrow, self.down_label,
-                   self.up_arrow, self.up_label, self.ip_label]
-        if hasattr(self, "ip_sep"):
+                   self.up_arrow, self.up_label]
+        if self.ip_label is not None:
+            widgets.append(self.ip_label)
+        if self.ip_sep is not None:
             widgets.append(self.ip_sep)
         for widget in widgets:
             widget.bind("<ButtonPress-1>", self._on_drag_start)
@@ -292,23 +335,35 @@ class SpeedOverlay:
         if self.cfg["click_through"]:
             return
         self.dragging = True
-        self.drag_x = event.x_root - self.root.winfo_x()
-        self.drag_y = event.y_root - self.root.winfo_y()
+        self.drag_moved = False
+        self.drag_start_x = event.x_root
+        self.drag_start_y = event.y_root
+        self.drag_x = self.root.winfo_x()
+        self.drag_y = self.root.winfo_y()
 
     def _on_drag_motion(self, event):
         if not self.dragging:
             return
-        x = event.x_root - self.drag_x
-        y = event.y_root - self.drag_y
+        dx = event.x_root - self.drag_start_x
+        dy = event.y_root - self.drag_start_y
+        if not self.drag_moved and abs(dx) < DRAG_THRESHOLD and abs(dy) < DRAG_THRESHOLD:
+            return
+        self.drag_moved = True
+        x = self.drag_x + dx
+        y = self.drag_y + dy
         self.root.geometry(f"+{x}+{y}")
         self.custom_position = True
 
     def _on_drag_end(self, event):
+        if not self.dragging:
+            return
         self.dragging = False
-        if self.custom_position:
+        if self.drag_moved and self.custom_position:
             self.cfg["custom_x"] = self.root.winfo_x()
             self.cfg["custom_y"] = self.root.winfo_y()
             settings.save(self.cfg)
+            return
+        self._toggle_ip_visibility()
 
     def _show_context_menu(self, event):
         menu = tk.Menu(self.root, tearoff=0)
@@ -355,6 +410,10 @@ class SpeedOverlay:
         menu.add_command(
             label=f"{'Disable' if self.cfg['compact'] else 'Enable'} Compact Mode",
             command=self._toggle_compact,
+        )
+        menu.add_command(
+            label=f"{'Hide' if self.cfg.get('show_ip') else 'Show'} IP Info",
+            command=self._toggle_ip_visibility,
         )
         menu.add_command(
             label=f"{'Disable' if self.cfg['click_through'] else 'Enable'} Click-Through",
@@ -420,6 +479,10 @@ class SpeedOverlay:
         self.cfg["compact"] = not self.cfg["compact"]
         self._rebuild()
 
+    def _toggle_ip_visibility(self):
+        self.cfg["show_ip"] = not self.cfg.get("show_ip", False)
+        self._rebuild()
+
     def _toggle_click_through(self):
         self.cfg["click_through"] = not self.cfg["click_through"]
         self._save()
@@ -452,8 +515,8 @@ class SpeedOverlay:
         for widget in self.frame.winfo_children():
             widget.destroy()
         self.frame.destroy()
-        if hasattr(self, "ip_sep"):
-            del self.ip_sep
+        self.ip_label = None
+        self.ip_sep = None
         self._build_ui()
         if not self.custom_position:
             self._position_window()
@@ -488,6 +551,8 @@ class SpeedOverlay:
 
     def _update_ip_label(self, theme):
         """Update the IP/country label with the latest fetched info."""
+        if self.ip_label is None:
+            return
         info = self.ip_fetcher.snapshot()
         if info["ip"]:
             if self.cfg["compact"]:

@@ -14,6 +14,7 @@ DEFAULTS = {
     "opacity": 0.85,
     "update_interval": 1.0,
     "compact": False,
+    "show_ip": False,
     "click_through": False,
     "auto_start": False,
 }

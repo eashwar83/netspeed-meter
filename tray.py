@@ -119,6 +119,11 @@ class TrayIcon:
                 checked=self._check(lambda: cfg["compact"]),
             ),
             pystray.MenuItem(
+                "Show IP Info",
+                self._action(overlay._toggle_ip_visibility),
+                checked=self._check(lambda: cfg.get("show_ip", False)),
+            ),
+            pystray.MenuItem(
                 "Click-Through",
                 self._action(overlay._toggle_click_through),
                 checked=self._check(lambda: cfg["click_through"]),
